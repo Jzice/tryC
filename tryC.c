@@ -12,6 +12,7 @@
 #define RETURNFLAG DBL_MAX             // indicate a return statement has occured in a function
 
 /* this structure represent a symbol store in a symbol table */
+// symbol
 typedef struct symStruct {  
     int type;                  //the type of the symbol:  Num, Char, Str, Array, Func
     char name[MAXNAMESIZE];    // record the symbol name
@@ -22,18 +23,19 @@ typedef struct symStruct {
     } pointer;
     int levelNum;               // indicate the declare nesting level
 } symbol;
-symbol symtab[SYMTABSIZE];
-int symPointer = 0;             // the symbol stack pointer
-int currentlevel = 0;           // current nesting level
+symbol g_symtab[SYMTABSIZE];    //符号表
+int g_symPointer = 0;           // the symbol stack pointer
+int g_currentlevel = 0;         // current nesting level
 
-char* src, * old_src;           // the text process currently
+char* g_src, 
+    * g_old_src;           // the text process currently
 
 enum {
     debug, run
 };
-int compileState = run;          // current interpre state
+int g_compileState = run;          // current interpre state
 
-double return_val = 0;           // used for reserve the return value of function
+double g_return_val = 0;           // used for reserve the return value of function
 
 /* tokens and classes (operators last and in precedence order) */
 enum {
@@ -42,11 +44,12 @@ enum {
     Assign, OR, AND, Equal, Sym, FuncSym, ArraySym, Void,
     Nequal, LessEqual, GreatEqual
 };
-int token;                      // current token type
+char* KEYWORDS = "array func else if return while print puts read";
+int g_token;                      // current token type
 union tokenValue {
     symbol* ptr;                // used when return a string or a symbol address for assignment
     double val;                 // token value, for Char or Num
-} token_val;
+} g_token_val;
 
 /*--------------- function declaration ---------------*/
 double function();
@@ -57,287 +60,307 @@ int boolexp();
 double expression();
 double factor();
 double term();
-void match(int tk);
-void next();
+void matchThenNext(int tk);
+void parse_next_token();
 
 /* -------------------  lexical analysis  ---------------------------------*/
 /* get the next token of the input string */
-
-void next() {
+// input: g_src
+// output: g_src, g_token, g_token_val
+void parse_next_token() {
     char* last_pos;
 
-    while ((token = *src)) {
-        ++src;
-        if (token == '\n') {                // a new line
-            if(compileState == debug)       // if on debug mode, print the currnet process line
-                printf("%.*s",  (int)(src - old_src), old_src);
-            old_src = src;
+    while ((g_token = *g_src)) {
+        ++g_src;
+        if (g_token == '\n') {      // a new line
+            if(g_compileState == debug)       // if on debug mode, print the currnet process line
+                printf("%.*s",  (int)(g_src - g_old_src), g_old_src);
+            g_old_src = g_src;
         }
-        else if (token == '#') {            // skip comments
-            while (*src != 0 && *src != '\n') {
-                src++;
+        else if (g_token == '#') {   // skip comments
+            while (*g_src != 0 && *g_src != '\n') {
+                g_src++;
             }
         }
-        else if ((token >= 'a' && token <= 'z') || (token >= 'A' && token <= 'Z') || (token == '_')) {
-            last_pos = src - 1;             // process symbols
+        else if ((g_token >= 'a' && g_token <= 'z') || (g_token >= 'A' && g_token <= 'Z') || (g_token == '_')) {
+            last_pos = g_src - 1;             // process symbols
             char nameBuffer[MAXNAMESIZE];
-            nameBuffer[0] = token;
-            while ((*src >= 'a' && *src <= 'z') || (*src >= 'A' && *src <= 'Z') || (*src >= '0' && *src <= '9') || (*src == '_')) {
-                nameBuffer[src - last_pos] = *src;
-                src++;
+            nameBuffer[0] = g_token;
+            while ((*g_src >= 'a' && *g_src <= 'z') || (*g_src >= 'A' && *g_src <= 'Z') || (*g_src >= '0' && *g_src <= '9') || (*g_src == '_')) {
+                nameBuffer[g_src - last_pos] = *g_src;
+                g_src++;
             }
-            nameBuffer[src - last_pos] = 0;                 // get symbol name
-            int i;
-            for (i = symPointer-1; i >= 0; --i) {           // search symbol in symbol table 
-                if (strcmp(nameBuffer, symtab[i].name) == 0) {      // if find symbol: return the token according to symbol type
-                    if (symtab[i].type == Num || symtab[i].type == Char) {
-                        token_val.ptr = &symtab[i];
-                        token = Sym;
+            nameBuffer[g_src - last_pos] = 0;                 // get symbol name
+            for (int i = g_symPointer-1; i >= 0; --i) {           // search symbol in symbol table 
+                if (strcmp(nameBuffer, g_symtab[i].name) == 0) {      // if find symbol: return the token according to symbol type
+                    if (g_symtab[i].type == Num || g_symtab[i].type == Char) {
+                        g_token_val.ptr = &g_symtab[i];
+                        g_token = Sym;
                     }
-                    else if (symtab[i].type == FuncSym) {
-                        token_val.ptr = &symtab[i];
-                        token = symtab[i].type;
+                    else if (g_symtab[i].type == FuncSym) {
+                        g_token_val.ptr = &g_symtab[i];
+                        g_token = g_symtab[i].type;
                     }
-                    else if (symtab[i].type == ArraySym) {
-                        token_val.ptr = &symtab[i];
-                        token = symtab[i].type;
+                    else if (g_symtab[i].type == ArraySym) {
+                        g_token_val.ptr = &g_symtab[i];
+                        g_token = g_symtab[i].type;
                     }
                     else {
-                        if (symtab[i].type == Void) {
-                            token = Sym;
-                            token_val.ptr = &symtab[i];
+                        if (g_symtab[i].type == Void) {
+                            g_token = Sym;
+                            g_token_val.ptr = &g_symtab[i];
                         }
-                        else token = symtab[i].type;
+                        else g_token = g_symtab[i].type;
                     }
                     return;
                 }
             }
-            strcpy(symtab[symPointer].name, nameBuffer);        // if symbol not found, create a new one 
-            symtab[symPointer].levelNum = currentlevel;
-            symtab[symPointer].type = Void;
-            token_val.ptr = &symtab[symPointer];
-            symPointer++;
-            token = Sym;
+            strcpy(g_symtab[g_symPointer].name, nameBuffer);        // if symbol not found, create a new one 
+            g_symtab[g_symPointer].levelNum = g_currentlevel;
+            g_symtab[g_symPointer].type = Void;
+            g_token_val.ptr = &g_symtab[g_symPointer++];
+            g_token = Sym;
             return;
         }
-        else if (token >= '0' && token <= '9') {        // process numbers
-            token_val.val = (double)token - '0';
-            while (*src >= '0' && *src <= '9') {
-                token_val.val = token_val.val * 10.0 + *src++ - '0';
+        else if (g_token >= '0' && g_token <= '9') {        // process numbers
+            g_token_val.val = (double)g_token - '0';
+            while (*g_src >= '0' && *g_src <= '9') {
+                g_token_val.val = g_token_val.val * 10.0 + *g_src++ - '0';
             }
-            if (*src == '.') {
-                src++;
+            if (*g_src == '.') {
+                g_src++;
                 int countDig = 1;
-                while (*src >= '0' && *src <= '9') {
-                    token_val.val = token_val.val + ((double)(*src++) - '0')/(10.0 * countDig++);
+                while (*g_src >= '0' && *g_src <= '9') {
+                    g_token_val.val +=  ((double)(*g_src++) - '0')/(10.0 * countDig++);
                 }
             }
-            token = Num;
+            g_token = Num;
             return;
         }
-        else if (token == '\'') {               // parse char
-            token_val.val = *src++;
-            token = Char;
-            src++;
+        else if (g_token == '\'') {               // parse char
+            g_token_val.val = *g_src++;
+            g_token = Char;
+            g_src++;
             return;
         }
-        else if (token == '"' ) {               // parse string
-            last_pos = src;
+        else if (g_token == '"' ) {               // parse string
+            last_pos = g_src;
             int numCount = 0;
-            while (*src != 0 && *src != token) {
-                src++;
+            while (*g_src != 0 && *g_src != g_token) {
+                g_src++;
                 numCount++;          
             }
-            if (*src) {
-                *src = 0;
-                token_val.ptr = malloc(sizeof(char) * numCount + 8);
-                strcpy((char *)token_val.ptr, last_pos);
-                *src = token;
-                src++;
+            if (*g_src) {
+                *g_src = 0;
+                g_token_val.ptr = malloc(sizeof(char) * numCount + 8);
+                strcpy((char *)g_token_val.ptr, last_pos);
+                *g_src = g_token;
+                g_src++;
             }
-            token = Str;
+            g_token = Str;
             return;
         }
-        else if (token == '=') {            // parse '==' and '='
-            if (*src == '=') {
-                src++;
-                token = Equal;
-            }
-            return;
-        }
-        else if (token == '!') {               // parse '!='
-            if (*src == '=') {
-                src++;
-                token = Nequal;
+        else if (g_token == '=') {            // parse '==' and '='
+            if (*g_src == '=') {
+                g_src++;
+                g_token = Equal;
             }
             return;
         }
-        else if (token == '<') {               // parse '<=',  or '<'
-            if (*src == '=') {
-                src++;
-                token = LessEqual;
+        else if (g_token == '!') {               // parse '!='
+            if (*g_src == '=') {
+                g_src++;
+                g_token = Nequal;
             }
             return;
         }
-        else if (token == '>') {                // parse '>=',  or '>'
-            if (*src == '=') {
-                src++;
-                token = GreatEqual;
+        else if (g_token == '<') {               // parse '<=',  or '<'
+            if (*g_src == '=') {
+                g_src++;
+                g_token = LessEqual;
             }
             return;
         }
-        else if (token == '|') {                // parse  '||'
-            if (*src == '|') {
-                src++;
-                token = OR;
+        else if (g_token == '>') {                // parse '>=',  or '>'
+            if (*g_src == '=') {
+                g_src++;
+                g_token = GreatEqual;
             }
             return;
         }
-        else if (token == '&') {                // parse  '&&'
-            if (*src == '&') {
-                src++;
-                token = AND;
+        else if (g_token == '|') {                // parse  '||'
+            if (*g_src == '|') {
+                g_src++;
+                g_token = OR;
             }
             return;
         }
-        else if ( token == '*' || token == '/'  || token == ';' || token == ',' || token == '+' || token == '-' ||
-            token == '(' || token == ')' || token == '{' || token == '}' ||  token == '[' || token == ']') {
+        else if (g_token == '&') {                // parse  '&&'
+            if (*g_src == '&') {
+                g_src++;
+                g_token = AND;
+            }
             return;
         }
-        else if (token == ' ' || token == '\t') {        }
+        else if ( g_token == '*' || g_token == '/'  || g_token == ';' || g_token == ',' || g_token == '+' || g_token == '-' ||
+            g_token == '(' || g_token == ')' || g_token == '{' || g_token == '}' ||  g_token == '[' || g_token == ']') {
+            return;
+        }
+        else if (g_token == ' ' || g_token == '\t') {        }
         else {
-            printf("unexpected token: %d\n", token);
+            printf("unexpected token: %d\n", g_token);
         }
     }
 }
 
-void match(int tk) {
-    if (token == tk) {
-        if (compileState == debug) {
+// 匹配当前token并获取下一个token
+void matchThenNext(int tk) {
+    if (g_token == tk) {
+        if (g_compileState == debug) {
             if(isprint(tk))
                 printf("match: %c\n", tk );
             else
                 printf("match: %d\n", tk);
         }
-        next();
+        // parse下一个token
+        parse_next_token();
     }
     else {
-        printf("line %.*s:expected token: %d\n", (int)(src - old_src), old_src,  tk);
+        printf("line %.*s:expected token: %d\n", (int)(g_src - g_old_src), g_old_src,  tk);
         exit(-1);
     }
 }
 
 /*--------------------------  grammatical analysis and run ----------------------------------*/
 
+// term
+// term -> factor { multiop factor }
 double term() {
     double temp = factor();
-    while (token == '*' || token == '/') {
-        if (token == '*') {
-            match('*');
+    while (g_token == '*' || g_token == '/') {
+        if (g_token == '*') {
+            matchThenNext('*');
             temp *= factor();
         }
         else {
-            match('/');
+            matchThenNext('/');
             temp /= factor();
         }
     }
     return temp;
 }
 
+// 因子
+// factor -> num | (expr)
 double factor() {
     double temp = 0;
-    if (token == '(') {
-        match('(');
-        temp = expression();
-        match(')');
-    }
-    else if(token == Num ||  token == Char){
-        temp = token_val.val;
-        match(token);
-    }
-    else if (token == Sym) {
-        temp = token_val.ptr->value;
-        match(Sym);
-    }
-    else if (token == FuncSym) {
-        return function();
-    }
-    else if (token == ArraySym) {
-        symbol* ptr = token_val.ptr;
-        match(ArraySym);
-        match('[');
-        int index = (int)expression();
-        if (index >= 0 && index < ptr->value) {
-            temp = ptr->pointer.list[index].value;
-        }
-        match(']');
+    symbol* ptr = g_token_val.ptr;
+    switch (g_token) {
+        case '(':                       // ( <expr> )
+            matchThenNext('(');
+            temp = expression();
+            matchThenNext(')');
+            break;
+        case Num:                           // <num>
+        case Char:                          // <char>
+            temp = g_token_val.val;
+            matchThenNext(g_token);
+            break;
+        case Sym:                           // <symbol>
+            temp = g_token_val.ptr->value;
+            matchThenNext(Sym);
+            break;
+        case FuncSym:                       //函数符号
+            return function();
+            break;
+        case ArraySym:                      //数组符号
+            ptr = g_token_val.ptr;
+            matchThenNext(ArraySym);
+            matchThenNext('[');
+            int index = (int)expression();
+            if (index >= 0 && index < ptr->value) {
+                temp = ptr->pointer.list[index].value;
+            }
+            matchThenNext(']');
+            break;
+        default:
+            break;
     }
     return temp;
 }
 
+// 求解表达式, 返回表达式的值
+// expr => term { addop term }
 double expression() {
     double temp = term();
-    while (token == '+' || token == '-') {
-        if (token == '+') {
-            match('+');
+    while (g_token == '+' || g_token == '-') {
+        if (g_token == '+') {
+            matchThenNext('+');
             temp += term();
         }
         else {
-            match('-');
+            matchThenNext('-');
             temp -= term();
         }
     }
     return temp;
 }
 
+// 根据当前token, 生成bool表达式
 int boolexp() {
-    if (token == '(') {
-        match('(');
+    if (g_token == '(') {
+        matchThenNext('(');
         int result = boolOR();
-        match(')');
+        matchThenNext(')');
         return result;
     }
-    else if (token == '!') {
-        match('!');
+    else if (g_token == '!') {
+        matchThenNext('!');
         return boolexp();
     }
+
     double temp = expression();
-    if (token == '>') {
-        match('>');
-        return temp > expression();
-    }
-    else if (token == '<') {
-        match('<');
-        return temp < expression();
-    }
-    else if (token == GreatEqual) {
-        match(GreatEqual);
-        return temp >= expression();
-    }
-    else if (token == LessEqual) {
-        match(LessEqual);
-        return temp <= expression();
-    }
-    else if (token == Equal) {
-        match(Equal);
-        return temp == expression();
+    switch (g_token) {
+        case '>':
+            matchThenNext('>');
+            return temp > expression();
+            break;
+        case '<':
+            matchThenNext('<');
+            return temp < expression();
+            break;
+        case GreatEqual:
+            matchThenNext(GreatEqual);
+            return temp >= expression();
+            break;
+        case LessEqual:
+            matchThenNext(LessEqual);
+            return temp <= expression();
+            break;
+        case Equal:
+            matchThenNext(Equal);
+            return temp == expression();
+            break;
+        default:
+            break;
     }
     return 0;
 }
 
 void skipBoolExpr() {
     int count = 0;
-    while (token && !(token == ')' && count == 0)) {
-        if (token == '(') count++;
-        if (token == ')') count--;
-        token = *src++;
+    while (g_token && !(g_token == ')' && count == 0)) {
+        if (g_token == '(') count++;
+        if (g_token == ')') count--;
+        g_token = *g_src++;
     }
 }
 
+// 
 int boolAND() {
-    int val = boolexp();           
-    while (token == AND) {
-        match(AND);
+    int val = boolexp();
+    while (g_token == AND) {
+        matchThenNext(AND);
         if (val == 0){
             skipBoolExpr();
             return 0;         // short cut
@@ -348,10 +371,11 @@ int boolAND() {
     return val;
 }
 
+// parse 
 int boolOR() {
     int val = boolAND();
-    while (token == OR) {
-        match(OR);
+    while (g_token == OR) {
+        matchThenNext(OR);
         if (val == 1){
             skipBoolExpr();
             return 1;         // short cut
@@ -362,187 +386,206 @@ int boolOR() {
     return val;
 }
 
+// 跳过statment
 void skipStatments() {
-    if(token == '{')
-        token = *src++;
+    if(g_token == '{')
+        g_token = *g_src++;
     int count = 0;
-    while (token && !(token == '}' && count == 0)) {
-        if (token == '}') count++;
-        if (token == '{') count--;
-        token = *src++;
+    while (g_token && !(g_token == '}' && count == 0)) {
+        if (g_token == '}') count++;
+        if (g_token == '{') count--;
+        g_token = *g_src++;
     }
-    match('}');
+    matchThenNext('}');
 }
 
+// 语句
+// statement => { statement } 
 double statement() {
-    if (token == '{') {
-        match('{');
-        while (token != '}') {
-            if (RETURNFLAG == statement()) 
-                return RETURNFLAG;
-        }
-        match('}');
-    }
-    else if (token == If) {
-        match(If);
-        match('(');
-        int boolresult = boolOR();
-        match(')');
-        if (boolresult) {
-            if (RETURNFLAG == statement()) 
-                return RETURNFLAG;
-        }
-        else skipStatments();
-        if (token == Else) {
-            match(Else);
-            if (!boolresult) {
-                if (RETURNFLAG == statement())
-                    return RETURNFLAG;
+    symbol* s;
+    int func;
+    switch (g_token) {
+        case '{':
+            matchThenNext('{');
+            while (g_token != '}') {
+                if (RETURNFLAG == statement()) 
+                    return RETURNFLAG;   // return 语句
             }
-            else skipStatments();
-        }
-    }
-    else if (token == While) {
-        match(While);
-        char* whileStartPos = src;
-        char* whileStartOldPos = old_src;
-        int boolresult;
-        do {
-            src = whileStartPos;
-            old_src = whileStartOldPos;
-            token = '(';
-            match('(');
-            boolresult = boolOR();
-            match(')');
+            matchThenNext('}');
+            break;
+        case If:                   //if-stmt ->  if ( <bool-exp> ) [statement] ;
+            matchThenNext(If);
+            matchThenNext('(');
+            int boolresult = boolOR();
+            matchThenNext(')');
             if (boolresult) {
                 if (RETURNFLAG == statement()) 
                     return RETURNFLAG;
             }
             else skipStatments();
-        }while (boolresult);
-    }
-    else if (token == Sym || token == ArraySym) {
-        symbol* s = token_val.ptr;
-        int tktype = token;
-        int index;
-        match(tktype);
-        if (tktype == ArraySym) {
-            match('[');
-            index = expression();
-            match(']');
-            match('=');
-            if (index >= 0 && index < s->value) {
-                s->pointer.list[index].value = expression();
+
+            if (g_token == Else) {
+                matchThenNext(Else);
+                if (!boolresult) {
+                    if (RETURNFLAG == statement())
+                        return RETURNFLAG;
+                }
+                else skipStatments();
             }
-        }
-        else {
-            match('=');
-            if (token == Str) {
-                s->pointer.funcp = (char*)token_val.ptr;
-                s->type = Str;
-                match(Str);
-            }
-            else if (token == Char) {
-                s->value = token_val.val;
-                s->type = Char;
-                match(Char);
+            break;
+        case While:                             // while ( bool-expr ) {
+            matchThenNext(While);               //    [ statemet ]
+            char* whileStartPos = g_src;        // }
+            char* whileStartOldPos = g_old_src;
+            do {
+                g_src = whileStartPos;
+                g_old_src = whileStartOldPos;
+                g_token = '(';
+                matchThenNext('(');
+                boolresult = boolOR();
+                matchThenNext(')');
+                if (boolresult) {
+                    if (RETURNFLAG == statement()) 
+                        return RETURNFLAG;
+                }
+                else skipStatments();
+            }while (boolresult);
+            break;
+        case Sym:
+        case ArraySym:                     // array <array_name>()
+            s = g_token_val.ptr;
+            int tktype = g_token;
+            int index;
+            matchThenNext(tktype);
+            if (tktype == ArraySym) {
+                matchThenNext('[');
+                index = expression();
+                matchThenNext(']');
+                matchThenNext('=');
+                if (index >= 0 && index < s->value) {
+                    s->pointer.list[index].value = expression();
+                }
             }
             else {
-                s->value = expression();
-                s->type = Num;
+                matchThenNext('=');
+                if (g_token == Str) {
+                    s->pointer.funcp = (char*)g_token_val.ptr;
+                    s->type = Str;
+                    matchThenNext(Str);
+                }
+                else if (g_token == Char) {
+                    s->value = g_token_val.val;
+                    s->type = Char;
+                    matchThenNext(Char);
+                }
+                else {
+                    s->value = expression();
+                    s->type = Num;
+                }
             }
-        }
-        match(';');
-    }
-    else if (token == Array) {
-        match(Array);
-        symbol* s = token_val.ptr;
-        match(Sym);
-        match('(');
-        int length = (int)expression();
-        match(')');
-        s->pointer.list = malloc(sizeof(struct symStruct) * length + 1);
-        for (int i = 0; i < length; ++i)
-            s->pointer.list[i].type = Num;
-        s->value = length;
-        s->type = ArraySym;
-        match(';');
-    }
-    else if (token == Func) {
-        match(Func);
-        symbol* s = token_val.ptr;
-        s->type = FuncSym;
-        match(Sym);
-        s->pointer.funcp = src;
-        s->value = token;
-        skipStatments();
-        match(';');
-    }
-    else if (token == Return) {
-        match(Return);
-        match('(');
-        return_val = expression();
-        match(')');
-        match(';');
-        return RETURNFLAG;
-    }
-    else if (token == Print || token == Read || token == Puts) {
-        int func = token;
-        double temp;
-        match(func);
-        match('(');
-        switch (func) {
-        case Print: 
-            temp = expression();
-            printf("%lf\n", temp);
+            matchThenNext(';');
             break;
-        case Puts: 
-            printf("%s\n", (char*)token_val.ptr);
-            match(Str);
+        case Array:
+            matchThenNext(Array);
+            s = g_token_val.ptr;
+            matchThenNext(Sym);
+            matchThenNext('(');
+            int length = (int)expression();
+            matchThenNext(')');
+            s->pointer.list = malloc(sizeof(struct symStruct) * length + 1);
+            for (int i = 0; i < length; ++i)
+                s->pointer.list[i].type = Num;
+            s->value = length;
+            s->type = ArraySym;
+            matchThenNext(';');
             break;
-        case Read:
-            scanf("%lf", &token_val.ptr->value);
-            token_val.ptr->type = Num;
-            match(Sym);
-        }
-        match(')');
-        match(';');
-    }
+        case Func:                  // func <funcname> { ... };
+            matchThenNext(Func);    // func
+            s = g_token_val.ptr;    // 
+            s->type = FuncSym;
+            matchThenNext(Sym);         // funcname
+            s->pointer.funcp = g_src;   // 记录函数源码起始位置
+            s->value = g_token;         // 符号表中记录函数名
+            skipStatments();            // 跳过函数体, 在调用时再处理
+            matchThenNext(';');         // 函数
+            break;
+        case Return:                     // return (<expr>) ;
+            matchThenNext(Return);
+            matchThenNext('(');
+            g_return_val = expression();
+            matchThenNext(')');
+            matchThenNext(';');
+            return RETURNFLAG;
+        case Print:             // print(<expr>);
+        case Read:              // read (<expr>);
+        case Puts:              // put ( <expr> );
+            func = g_token;
+            double temp;
+            matchThenNext(func);
+            matchThenNext('(');
+            switch (func) {
+            case Print: 
+                temp = expression();
+                printf("%lf\n", temp);
+                break;
+            case Puts: 
+                printf("%s\n", (char*)g_token_val.ptr);
+                matchThenNext(Str);
+                break;
+            case Read:
+                scanf("%lf", &g_token_val.ptr->value);
+                g_token_val.ptr->type = Num;
+                matchThenNext(Sym);
+            }
+            matchThenNext(')');
+            matchThenNext(';');
+            break;
+        default:
+            break;
+    };
     return 0;
 }
 
+// 调用函数
+/*
+ * <func_name>( [arg] ); 
+ * */
 double function() {
-    currentlevel++;
-    return_val = 0;
+    g_currentlevel++;
+    g_return_val = 0;
 
-    symbol* s = token_val.ptr;
-    match(FuncSym);
-    match('(');
-    while (token != ')') {
-        symtab[symPointer] = *token_val.ptr;
-        strcpy(symtab[symPointer].name, token_val.ptr->name);
-        symtab[symPointer].levelNum = currentlevel;
-        symPointer++;
-        match(Sym);
-        if (token == ',')
-            match(',');
+    // parse func
+    symbol* s = g_token_val.ptr;
+    matchThenNext(FuncSym);
+    matchThenNext('(');
+    while (g_token != ')') {
+        g_symtab[g_symPointer] = *g_token_val.ptr;
+        strcpy(g_symtab[g_symPointer].name, g_token_val.ptr->name);
+        g_symtab[g_symPointer].levelNum = g_currentlevel;
+        g_symPointer++;
+        matchThenNext(Sym);
+        if (g_token == ',')
+            matchThenNext(',');
     }
-    match(')');
-    char* startPos = src;
-    char* startOldPos = old_src;
-    int startToken = token;
-    old_src = src = s->pointer.funcp;
-    token = (int)s->value;
+    matchThenNext(')');
+
+    //
+    char* startPos = g_src;
+    char* startOldPos = g_old_src;
+    int startToken = g_token;
+    g_old_src = g_src = s->pointer.funcp;
+    g_token = (int)s->value;
     statement();
-    src = startPos;
-    old_src = startOldPos;
-    token = startToken;
+    g_src = startPos;
+    g_old_src = startOldPos;
+    g_token = startToken;
 
-    while (symtab[symPointer - 1].levelNum == currentlevel) {
-        symPointer--;
+    while (g_symtab[g_symPointer - 1].levelNum == g_currentlevel) {
+        g_symPointer--;
     }
-    currentlevel--;
-    return return_val;
+    
+    g_currentlevel--;
+    return g_return_val;
 }
 
 /*----------------------------------------------------------------*/
@@ -550,24 +593,29 @@ double function() {
 int main(int argc, char** argv)
 {
     int i, fd;
-    src = "array func else if return while print puts read";
+
+    // 初始化符号表
+    g_src = KEYWORDS;
     for (i = Array; i <= Read; ++i) {
-        next();
-        symtab[symPointer -1].type = i;
+        parse_next_token();
+        g_symtab[g_symPointer -1].type = i;
     }
-    if (!(src = old_src = (char*)malloc(POOLSIZE))) {
+
+    // 初始化文件缓冲区
+    if (!(g_src = g_old_src = (char*)malloc(POOLSIZE))) {
         printf("could not malloc(%d) for source area\n", POOLSIZE);
         return -1;
     }
 
+    // 处理输入参数
     ++argv; --argc;
     if (argc > 0) {
         if (**argv == '-' && (*argv)[1] == 'd') {
-            compileState = debug;
+            g_compileState = debug;
             ++argv; --argc;
         }
         else {
-            compileState = run;
+            g_compileState = run;
         }
     }
     if (argc < 1) {
@@ -575,18 +623,23 @@ int main(int argc, char** argv)
         return -1;
     }
 
+    // 读取文件到g_src缓冲区
     if ((fd = open(*argv, 0)) < 0) {                // read the source file
         printf("could not open(%s)\n", *argv);
         return -1;
     }
-    if ((i = read(fd, src, POOLSIZE - 1)) <= 0) {
+    if ((i = read(fd, g_src, POOLSIZE - 1)) <= 0) {
         printf("read() returned %d\n", i);
         return -1;
     }
-    src[i] = 0; // add EOF character
+
+    g_src[i] = 0; // add EOF character
     close(fd);
-    next();
-    while (token != 0) {
+
+    // 词法解析
+    parse_next_token();
+
+    while (g_token != 0) {
         statement();
     }
     return 0;
